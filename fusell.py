@@ -492,67 +492,32 @@ class FUSELL(object):
             argv, ctypes.byref(fuse_ops), ctypes.sizeof(fuse_ops), None)
         assert session
 
-        try:
-            old_handler = signal(SIGINT, SIG_DFL)
-        except ValueError:
-            old_handler = SIG_DFL
+        #try:
+        #    old_handler = signal(SIGINT, SIG_DFL)
+        #except ValueError:
+        #    old_handler = SIG_DFL
 
-        err = self.libfuse.fuse_set_signal_handlers(session)
-        assert err == 0
+        #err = self.libfuse.fuse_set_signal_handlers(session)
+        #assert err == 0
 
         self.libfuse.fuse_session_add_chan(session, chan)
 
         self.chan = chan
         self.session = session
 
-        yield
+        yield self
 
-        err = self.libfuse.fuse_remove_signal_handlers(session)
-        assert err == 0
+        #err = self.libfuse.fuse_remove_signal_handlers(session)
+        #assert err == 0
 
-        try:
-            signal(SIGINT, old_handler)
-        except ValueError:
-            pass
+        #try:
+        #    signal(SIGINT, old_handler)
+        #except ValueError:
+        #    pass
 
         self.libfuse.fuse_session_remove_chan(chan)
         self.libfuse.fuse_session_destroy(session)
         self.libfuse.fuse_unmount(mountpoint, chan)
-
-    def run_fuse_loop(self):
-        session, chan = self.session, self.chan
-        chan = self.libfuse.fuse_session_next_chan(session, ctypes.c_void_p(0))
-        ch = ctypes.c_void_p(chan)
-
-        size = self.libfuse.fuse_chan_bufsize(chan)
-        buf = ctypes.create_string_buffer(size)
-
-        fd = self.libfuse.fuse_chan_fd(chan)
-        print('fd', fd)
-        obj_poll = select.poll()
-        obj_poll.register(fd, select.POLLIN | select.POLLPRI)
-
-        while not self.libfuse.fuse_session_exited(session):
-            l = obj_poll.poll(500)
-
-            if l:
-                [(fd, event)] = l
-                print(fd, event)
-
-                fbuf = fuse_buf()
-                fbuf.mem = ctypes.cast(buf, ctypes.c_void_p)
-                fbuf.size = size
-                res = self.libfuse.fuse_session_receive_buf(session, ctypes.byref(fbuf), ctypes.byref(ch))
-                print('fuse_session_receive_buf', res)
-
-                if res == -4:
-                    continue
-                elif res < 0:
-                    break
-
-                self.libfuse.fuse_session_process_buf(session, ctypes.byref(fbuf), ch);
-            else:
-                pass
 
     def reply_err(self, req, err):
         return self.libfuse.fuse_reply_err(req, err)
