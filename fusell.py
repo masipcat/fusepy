@@ -16,7 +16,9 @@ from __future__ import print_function, absolute_import, division
 import ctypes
 import errno
 import os
+import select
 
+from contextlib import contextmanager
 from ctypes.util import find_library
 from platform import machine, system
 from signal import signal, SIGINT, SIG_DFL
@@ -62,6 +64,9 @@ class LibFUSE(ctypes.CDLL):
         self.fuse_session_add_chan.argtypes = (
             ctypes.c_void_p, ctypes.c_void_p)
         self.fuse_session_loop.argtypes = (ctypes.c_void_p,)
+        self.fuse_session_receive_buf.argtypes = (ctypes.c_void_p, ctypes.POINTER(fuse_buf), ctypes.POINTER(ctypes.c_void_p))
+        self.fuse_session_receive_buf.restype = ctypes.c_int
+        self.fuse_session_next_chan.restype = ctypes.c_void_p
         self.fuse_remove_signal_handlers.argtypes = (ctypes.c_void_p,)
         self.fuse_session_remove_chan.argtypes = (ctypes.c_void_p,)
         self.fuse_session_destroy.argtypes = (ctypes.c_void_p,)
@@ -278,6 +283,12 @@ fuse_forget_data_p = ctypes.POINTER(fuse_forget_data)
 
 FUSE_SET_ATTR = ('st_mode', 'st_uid', 'st_gid', 'st_size', 'st_atime', 'st_mtime', None, 'st_atime_now', 'st_mtime_now', 'st_ctime')  # Flag #6 (FATTR_FH) is never received by setattr
 
+class fuse_buf(ctypes.Structure):
+    _fields_ = [('size', ctypes.c_size_t),
+                ('enum', ctypes.c_int),
+                ('mem', ctypes.c_void_p),
+                ('fd', ctypes.c_long)]
+
 class fuse_entry_param(ctypes.Structure):
     _fields_ = [
         ('ino', fuse_ino_t),
@@ -455,10 +466,12 @@ def setattr_mask_to_list(mask):
     return [FUSE_SET_ATTR[i] for i in range(len(FUSE_SET_ATTR)) if mask & (1 << i)]
 
 class FUSELL(object):
-    def __init__(self, mountpoint, encoding='utf-8'):
+    def __init__(self):
         self.libfuse = LibFUSE()
-        mountpoint = mountpoint.encode(encoding)
-        self.encoding = encoding
+
+    @contextmanager
+    def mount(self, mountpoint):
+        mountpoint = mountpoint.encode('utf-8')
 
         fuse_ops = fuse_lowlevel_ops()
 
@@ -489,8 +502,10 @@ class FUSELL(object):
 
         self.libfuse.fuse_session_add_chan(session, chan)
 
-        err = self.libfuse.fuse_session_loop(session)
-        assert err == 0
+        self.chan = chan
+        self.session = session
+
+        yield
 
         err = self.libfuse.fuse_remove_signal_handlers(session)
         assert err == 0
@@ -503,6 +518,41 @@ class FUSELL(object):
         self.libfuse.fuse_session_remove_chan(chan)
         self.libfuse.fuse_session_destroy(session)
         self.libfuse.fuse_unmount(mountpoint, chan)
+
+    def run_fuse_loop(self):
+        session, chan = self.session, self.chan
+        chan = self.libfuse.fuse_session_next_chan(session, ctypes.c_void_p(0))
+        ch = ctypes.c_void_p(chan)
+
+        size = self.libfuse.fuse_chan_bufsize(chan)
+        buf = ctypes.create_string_buffer(size)
+
+        fd = self.libfuse.fuse_chan_fd(chan)
+        print('fd', fd)
+        obj_poll = select.poll()
+        obj_poll.register(fd, select.POLLIN | select.POLLPRI)
+
+        while not self.libfuse.fuse_session_exited(session):
+            l = obj_poll.poll(500)
+
+            if l:
+                [(fd, event)] = l
+                print(fd, event)
+
+                fbuf = fuse_buf()
+                fbuf.mem = ctypes.cast(buf, ctypes.c_void_p)
+                fbuf.size = size
+                res = self.libfuse.fuse_session_receive_buf(session, ctypes.byref(fbuf), ctypes.byref(ch))
+                print('fuse_session_receive_buf', res)
+
+                if res == -4:
+                    continue
+                elif res < 0:
+                    break
+
+                self.libfuse.fuse_session_process_buf(session, ctypes.byref(fbuf), ch);
+            else:
+                pass
 
     def reply_err(self, req, err):
         return self.libfuse.fuse_reply_err(req, err)
