@@ -289,6 +289,12 @@ class fuse_buf(ctypes.Structure):
                 ('mem', ctypes.c_void_p),
                 ('fd', ctypes.c_long)]
 
+class fuse_bufvec(ctypes.Structure):
+    _fields_ = [('count', ctypes.c_size_t),
+                ('idx', ctypes.c_size_t),
+                ('off', ctypes.c_size_t),
+                ('buf', fuse_buf * 1)]
+
 class fuse_entry_param(ctypes.Structure):
     _fields_ = [
         ('ino', fuse_ino_t),
@@ -411,7 +417,7 @@ class fuse_lowlevel_ops(ctypes.Structure):
             None, fuse_req_t, fuse_ino_t, fuse_file_info_p, ctypes.c_void_p)),
 
         ('write_buf', ctypes.CFUNCTYPE(
-            None, fuse_req_t, fuse_ino_t, ctypes.c_void_p, c_off_t, fuse_file_info_p)),
+            None, fuse_req_t, fuse_ino_t, ctypes.POINTER(fuse_bufvec), c_off_t, fuse_file_info_p)),
 
         ('retrieve_reply', ctypes.CFUNCTYPE(
             None, fuse_req_t, ctypes.c_void_p, fuse_ino_t, c_off_t, ctypes.c_void_p)),
