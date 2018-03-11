@@ -607,6 +607,15 @@ class FUSELL(object):
         fi_dict = struct_to_dict(fi)
         self.write(req, ino, buf_str, off, fi_dict)
 
+    def fuse_write_buf(self, req, ino, bufv, off, fi):
+        mem_p = bufv.contents.buf[0].mem
+        size = bufv.contents.buf[0].size
+        mem = ctypes.cast(mem_p, ctypes.POINTER(ctypes.c_byte * size))
+        buf_str = ctypes.string_at(mem, size)
+
+        fi_dict = struct_to_dict(fi)
+        self.write_buf(req, ino, buf_str, off, fi_dict)
+
     def fuse_flush(self, req, ino, fi):
         self.flush(req, ino, struct_to_dict(fi))
 
@@ -850,3 +859,4 @@ class FUSELL(object):
             reply_err
         """
         self.reply_err(req, 0)
+
